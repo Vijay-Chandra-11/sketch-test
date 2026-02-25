@@ -1,0 +1,111 @@
+<a-scene webxr="optionalFeatures: dom-overlay; overlayElement: #overlay">
+    
+    <a-assets>
+      <a-asset-item id="female-avatar" src="avatar.glb"></a-asset-item>
+    </a-assets>
+
+    <a-entity 
+      id="ai-avatar" 
+      gltf-model="#female-avatar" 
+      position="0 0 -2" 
+      scale="1 1 1">
+    </a-entity>
+
+    <a-light type="directional" color="#ffffff" position="0 2 1" intensity="1.5"></a-light>
+    <a-light type="ambient" color="#ffffff" intensity="0.5"></a-light>
+
+  </a-scene>
+
+  <script>
+    const micBtn = document.getElementById('mic-btn');
+    const statusText = document.getElementById('status-text');
+    const aiAvatar = document.getElementById('ai-avatar');
+    
+    // REPLACE THIS with your actual API key for the hackathon
+    const API_KEY = 'AIzaSyCoARsuufjLWibeZEAJaIl1KNLLBshr50U'; 
+
+    // Setup Web Speech API (Listening)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.lang = 'en-US';
+
+    micBtn.addEventListener('click', () => {
+      recognition.start();
+      micBtn.innerText = "Listening...";
+      statusText.innerText = "Listening to you...";
+      
+      // Make the avatar bounce slightly when listening
+      aiAvatar.setAttribute('animation', 'property: position; to: 0 0.1 -2; dir: alternate; dur: 500; loop: true');
+    });
+
+    recognition.onresult = async (event) => {
+      const transcript = event.results[0][0].transcript;
+      statusText.innerText = `You: "${transcript}"`;
+      micBtn.innerText = "Processing...";
+      
+      // Stop the bouncing animation
+      aiAvatar.removeAttribute('animation');
+      
+      // Send to LLM
+      await processWithLLM(transcript);
+    };
+
+    recognition.onerror = (event) => {
+      statusText.innerText = "Microphone error. Ensure you are on HTTPS or Localhost.";
+      micBtn.innerText = "Tap to Speak";
+      aiAvatar.removeAttribute('animation');
+    };
+
+    // Setup LLM Call (Thinking)
+    async function processWithLLM(userText) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
+      
+      const systemPrompt = `You are a helpful AI assistant. 
+      Respond to this prompt: "${userText}". 
+      You MUST return your response ONLY as a JSON object with no markdown formatting. 
+      The JSON must have one key: "reply" (your spoken answer).`;
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: systemPrompt }] }]
+          })
+        });
+
+        const data = await response.json();
+        let rawText = data.candidates[0].content.parts[0].text;
+        rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsedResponse = JSON.parse(rawText);
+
+        statusText.innerText = "AI is speaking...";
+        speakResponse(parsedResponse.reply);
+
+      } catch (error) {
+        console.error("LLM Error:", error);
+        statusText.innerText = "API Error. Check console.";
+        micBtn.innerText = "Tap to Speak";
+      }
+    }
+
+    // Setup Text-to-Speech (Speaking)
+    function speakResponse(text) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Optional: Change the voice to a female voice if available
+      const voices = window.speechSynthesis.getVoices();
+      const femaleVoice = voices.find(voice => voice.name.includes('Female') || voice.name.includes('Samantha') || voice.name.includes('Google US English'));
+      if (femaleVoice) {
+        utterance.voice = femaleVoice;
+      }
+
+      utterance.onend = () => {
+        micBtn.innerText = "Tap to Speak";
+        statusText.innerText = "Status: Idle";
+      };
+
+      window.speechSynthesis.speak(utterance);
+    }
+  </script>
